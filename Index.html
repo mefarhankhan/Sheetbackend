@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Search Status</title>
+</head>
+<body>
+
+<h2>Search Your Status</h2>
+
+<input type="text" id="inputData" placeholder="Enter Mobile or Email">
+<button onclick="searchData()">Search</button>
+
+<p id="result"></p>
+
+<script>
+async function searchData() {
+    let input = document.getElementById("inputData").value;
+
+    let response = await fetch("https://sheet-fider-bot.onrender.com", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ query: input })
+    });
+
+    let data = await response.json();
+    document.getElementById("result").innerText = data.result;
+}
+</script>
+
+</body>
+</html>
