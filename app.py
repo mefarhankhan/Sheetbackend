@@ -8,34 +8,40 @@ from oauth2client.service_account import ServiceAccountCredentials
 app = Flask(__name__)
 CORS(app)
 
-# ✅ REQUIRED: Google API scope
+# Google API scope
 scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive"
 ]
 
-# ✅ Load credentials from Render ENV variable
+# Load credentials
 creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 
-# ✅ Authorize client
 client = gspread.authorize(creds)
 
-# ✅ Open your spreadsheet and worksheet
 spreadsheet = client.open("BOOK QUERIES")
 sheet = spreadsheet.worksheet("All orders")
 
+# Health check (VERY IMPORTANT for Render)
+@app.route("/")
+def home():
+    return "API is running"
 
-# ✅ API Route
+# API route
 @app.route("/search", methods=["POST"])
 def search():
-    data = request.json
-    query = str(data.get("query", "")).strip()
-
-    if not query:
-        return jsonify({"status": "Please enter mobile or email"})
-
     try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"status": "Invalid request"})
+
+        query = str(data.get("query", "")).strip()
+
+        if not query:
+            return jsonify({"status": "Please enter mobile or email"})
+
         records = sheet.get_all_records()
 
         for row in records:
@@ -45,19 +51,16 @@ def search():
             status = str(row.get("Status", "")).strip()
             courier = str(row.get("Courier Company", "")).strip()
 
-            # ✅ Match mobile or email
             if query == mobile or query.lower() == email.lower():
 
-                # ✅ Handle missing AWB
                 if not awb:
                     return jsonify({
                         "status": status,
                         "courier": courier,
                         "awb": "Not available",
-                        "tracking_link": "Not available yet"
+                        "tracking_link": ""
                     })
 
-                # ✅ Generate tracking link (Shiprocket)
                 tracking_link = f"https://shiprocket.co/tracking/{awb}"
 
                 return jsonify({
@@ -70,9 +73,11 @@ def search():
         return jsonify({"status": "Not Found"})
 
     except Exception as e:
-        return jsonify({"status": "Error", "message": str(e)})
+        return jsonify({
+            "status": "Error",
+            "message": str(e)
+        })
 
 
-# ✅ Run app (Render compatible)
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
