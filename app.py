@@ -23,7 +23,7 @@ client = gspread.authorize(creds)
 
 # ✅ Open your spreadsheet and worksheet
 spreadsheet = client.open("BOOK QUERIES")
-sheet = spreadsheet.worksheet("All order")
+sheet = spreadsheet.worksheet("All orders")
 
 
 # ✅ API Route
