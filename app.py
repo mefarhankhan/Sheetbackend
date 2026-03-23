@@ -29,35 +29,38 @@ sheet = spreadsheet.worksheet("All orders")
 # ✅ API Route
 @app.route("/search", methods=["POST"])
 def search():
-    data = request.json
-    query = str(data.get("query", "")).strip()
-
-    if not query:
-        return jsonify({"status": "Please enter mobile or email"})
-
     try:
+        print("==== API HIT ====")
+
+        data = request.get_json(silent=True) or {}
+        print("DATA:", data)
+
+        query = str(data.get("query", "")).strip()
+        print("QUERY:", query)
+
         records = sheet.get_all_records()
+        print("RECORDS LOADED:", len(records))
 
         for row in records:
-            mobile = str(row.get("Customer Mobile", "")).strip()
-            email = str(row.get("Customer Email", "")).strip()
-            awb = str(row.get("AWB Code", "")).strip()
-            status = str(row.get("Status", "")).strip()
-            courier = str(row.get("Courier Company", "")).strip()
+            print("ROW:", row)  # optional
 
-            # ✅ Match mobile or email
+            mobile = str(row.get("Customer Mobile") or "").strip()
+            email = str(row.get("Customer Email") or "").strip()
+            awb = str(row.get("AWB Code") or "").strip()
+            status = str(row.get("Status") or "").strip()
+            courier = str(row.get("Courier Company") or "").strip()
+
             if query == mobile or query.lower() == email.lower():
+                print("MATCH FOUND")
 
-                # ✅ Handle missing AWB
                 if not awb:
                     return jsonify({
                         "status": status,
                         "courier": courier,
                         "awb": "Not available",
-                        "tracking_link": "Not available yet"
+                        "tracking_link": ""
                     })
 
-                # ✅ Generate tracking link (Shiprocket)
                 tracking_link = f"https://shiprocket.co/tracking/{awb}"
 
                 return jsonify({
@@ -70,8 +73,8 @@ def search():
         return jsonify({"status": "Not Found"})
 
     except Exception as e:
+        print("ERROR:", str(e))   # 🔥 IMPORTANT
         return jsonify({"status": "Error", "message": str(e)})
-
 
 # ✅ Run app (Render compatible)
 if __name__ == "__main__":
