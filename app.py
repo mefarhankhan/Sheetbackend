@@ -8,6 +8,10 @@ from oauth2client.service_account import ServiceAccountCredentials
 app = Flask(__name__)
 CORS(app)
 
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
+
 # ✅ REQUIRED: Google API scope
 scope = [
     "https://spreadsheets.google.com/feeds",
@@ -27,6 +31,9 @@ sheet = spreadsheet.worksheet("All orders")
 
 
 # ✅ API Route
+@app.route("/")
+def home():
+    return "API is running"
 @app.route("/search", methods=["POST"])
 def search():
     try:
