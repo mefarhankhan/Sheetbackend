@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import threading
 import gspread
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -9,7 +10,9 @@ from oauth2client.service_account import ServiceAccountCredentials
 app = Flask(__name__)
 CORS(app)
 
-# Google API setup
+# ==============================
+# 🔐 Google API Setup
+# ==============================
 scope = [
     "https://spreadsheets.google.com/feeds",
     "https://www.googleapis.com/auth/drive"
@@ -21,41 +24,68 @@ client = gspread.authorize(creds)
 
 sheet = client.open("BOOK QUERIES").worksheet("All orders")
 
-# 🚀 CACHE
+# ==============================
+# 🚀 CACHE CONFIG
+# ==============================
 cache = {}
 last_updated = 0
-CACHE_TTL = 60  # seconds
+CACHE_TTL = 300  # 5 minutes (increase if needed)
 
-
+# ==============================
+# 🔄 CACHE REFRESH (FAST)
+# ==============================
 def refresh_cache():
     global cache, last_updated
 
-    records = sheet.get_all_records()
-    new_cache = {}
+    try:
+        records = sheet.get_all_values()  # ⚡ faster than get_all_records
+        headers = records[0]
+        rows = records[1:]
 
-    for row in records:
-        mobile = str(row.get("Customer Mobile") or "").strip()
-        email = str(row.get("Customer Email") or "").strip()
+        new_cache = {}
 
-        if mobile:
-            new_cache[mobile] = row
-        if email:
-            new_cache[email.lower()] = row
+        for row in rows:
+            data = dict(zip(headers, row))
 
-    cache = new_cache
-    last_updated = time.time()
-    print("✅ Cache refreshed:", len(cache))
+            mobile = str(data.get("Customer Mobile") or "").strip().lower()
+            email = str(data.get("Customer Email") or "").strip().lower()
+
+            if mobile:
+                new_cache[mobile] = data
+            if email:
+                new_cache[email] = data
+
+        cache = new_cache
+        last_updated = time.time()
+
+        print(f"✅ Cache refreshed: {len(cache)} entries")
+
+    except Exception as e:
+        print("❌ Cache refresh error:", str(e))
+
+
+# ==============================
+# ⚡ NON-BLOCKING REFRESH
+# ==============================
+def refresh_cache_async():
+    thread = threading.Thread(target=refresh_cache)
+    thread.daemon = True
+    thread.start()
 
 
 def get_cached_data():
     global last_updated
 
+    # If expired → refresh in background
     if time.time() - last_updated > CACHE_TTL:
-        refresh_cache()
+        refresh_cache_async()
 
     return cache
 
 
+# ==============================
+# 🏠 ROUTES
+# ==============================
 @app.route("/")
 def home():
     return "API is running 🚀"
@@ -65,14 +95,13 @@ def home():
 def search():
     try:
         data = request.get_json(silent=True) or {}
-        query = str(data.get("query", "")).strip()
+        query = str(data.get("query", "")).strip().lower()
 
         if not query:
             return jsonify({"status": "Invalid query"})
 
         data_cache = get_cached_data()
-
-        row = data_cache.get(query) or data_cache.get(query.lower())
+        row = data_cache.get(query)
 
         if not row:
             return jsonify({"status": "Not Found"})
@@ -91,11 +120,18 @@ def search():
         })
 
     except Exception as e:
-        print("ERROR:", str(e))
+        print("❌ ERROR:", str(e))
         return jsonify({"status": "Error", "message": str(e)})
 
 
-# Run app
+# ==============================
+# 🚀 PRELOAD CACHE (IMPORTANT)
+# ==============================
+refresh_cache()
+
+# ==============================
+# ▶️ RUN APP
+# ==============================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
