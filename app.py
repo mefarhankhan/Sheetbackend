@@ -29,16 +29,17 @@ sheet = client.open("BOOK QUERIES").worksheet("All orders")
 # ==============================
 cache = {}
 last_updated = 0
-CACHE_TTL = 300  # 5 minutes (increase if needed)
+CACHE_TTL = 300  # 5 minutes
+
 
 # ==============================
-# 🔄 CACHE REFRESH (FAST)
+# 🔄 CACHE REFRESH
 # ==============================
 def refresh_cache():
     global cache, last_updated
 
     try:
-        records = sheet.get_all_values()  # ⚡ faster than get_all_records
+        records = sheet.get_all_values()
         headers = records[0]
         rows = records[1:]
 
@@ -47,25 +48,31 @@ def refresh_cache():
         for row in rows:
             data = dict(zip(headers, row))
 
-            mobile = str(data.get("Customer Mobile") or "").strip().lower()
+            # Normalize keys
+            mobile = str(data.get("Customer Mobile") or "").strip()
             email = str(data.get("Customer Email") or "").strip().lower()
 
-            if mobile:
-                new_cache[mobile] = data
-            if email:
-                new_cache[email] = data
+            mobile = mobile.replace(" ", "").replace("+91", "")
+
+            keys = [mobile, email]
+
+            for key in keys:
+                if key:
+                    if key not in new_cache:
+                        new_cache[key] = []
+                    new_cache[key].append(data)
 
         cache = new_cache
         last_updated = time.time()
 
-        print(f"✅ Cache refreshed: {len(cache)} entries")
+        print(f"✅ Cache refreshed: {len(cache)} users")
 
     except Exception as e:
-        print("❌ Cache refresh error:", str(e))
+        print("❌ Cache error:", str(e))
 
 
 # ==============================
-# ⚡ NON-BLOCKING REFRESH
+# ⚡ ASYNC REFRESH
 # ==============================
 def refresh_cache_async():
     thread = threading.Thread(target=refresh_cache)
@@ -74,13 +81,18 @@ def refresh_cache_async():
 
 
 def get_cached_data():
-    global last_updated
-
-    # If expired → refresh in background
     if time.time() - last_updated > CACHE_TTL:
         refresh_cache_async()
-
     return cache
+
+
+# ==============================
+# ✂️ HELPER
+# ==============================
+def get_short_product(name):
+    if not name:
+        return ""
+    return name[:40]
 
 
 # ==============================
@@ -97,26 +109,46 @@ def search():
         data = request.get_json(silent=True) or {}
         query = str(data.get("query", "")).strip().lower()
 
+        # Normalize input
+        query = query.replace(" ", "").replace("+91", "")
+
         if not query:
             return jsonify({"status": "Invalid query"})
 
         data_cache = get_cached_data()
-        row = data_cache.get(query)
+        rows = data_cache.get(query)
 
-        if not row:
+        if not rows:
             return jsonify({"status": "Not Found"})
 
-        awb = str(row.get("AWB Code") or "").strip()
-        status = str(row.get("Status") or "").strip()
-        courier = str(row.get("Courier Company") or "").strip()
+        orders = []
 
-        tracking_link = f"https://shiprocket.co/tracking/{awb}" if awb else ""
+        for row in rows:
+            awb_raw = str(
+                row.get("AWB Code") or 
+                row.get("AWB") or ""
+            ).strip()
+
+            awb = awb_raw if awb_raw else None
+
+            order = {
+                "awb": awb,
+                "status": str(row.get("Status") or "").strip() or "Pending",
+                "courier": str(row.get("Courier Company") or "").strip() or "Not Assigned",
+                "product": get_short_product(
+                    row.get("Product Name") or ""
+                ) or "Not Available",
+                "created_at": str(
+                    row.get("Shiprocket Created At") or ""
+                ).strip() or "Not Available",
+                "tracking_link": f"https://shiprocket.co/tracking/{awb}" if awb else None
+            }
+
+            orders.append(order)
 
         return jsonify({
-            "status": status,
-            "courier": courier,
-            "awb": awb or "Not available",
-            "tracking_link": tracking_link
+            "count": len(orders),
+            "orders": list(reversed(orders))  # latest first
         })
 
     except Exception as e:
@@ -125,12 +157,12 @@ def search():
 
 
 # ==============================
-# 🚀 PRELOAD CACHE (IMPORTANT)
+# 🚀 PRELOAD CACHE
 # ==============================
 refresh_cache()
 
 # ==============================
-# ▶️ RUN APP
+# ▶️ RUN
 # ==============================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
