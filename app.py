@@ -39,7 +39,8 @@ def refresh_cache():
     global cache, last_updated
 
     try:
-        records = sheet.get_all_values()
+        records = sheet.get_all_records()
+        CACHE_TTL = 1800
         headers = records[0]
         rows = records[1:]
 
