@@ -120,6 +120,7 @@ def search():
                 "courier": row.get("Courier Company", "").strip() or "Not Assigned",
                 "product": get_short_product(row.get("Product Name", "")) or "Not Available",
                 "created_at": row.get("Shiprocket Created At", "").strip() or "Not Available",
+                 "edd": row.get("EDD", "").strip() or "Not Available",
                 "tracking_link": f"https://shiprocket.co/tracking/{awb}" if awb else None
             })
 
