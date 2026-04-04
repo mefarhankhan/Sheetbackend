@@ -40,7 +40,6 @@ def refresh_cache():
 
     try:
         records = sheet.get_all_records()
-        CACHE_TTL = 1800
         headers = records[0]
         rows = records[1:]
 
