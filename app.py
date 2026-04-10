@@ -28,9 +28,9 @@ sheet = client.open("BOOK QUERIES").worksheet("All orders")
 # ==============================
 # 🔴 REDASH CONFIG
 # ==============================
-REDASH_API_KEY = os.environ.get("MuksNDK1QVDm6BTBQZzMAcjBzGsY42vi7xyof4yz")
-REDASH_QUERY_ID = os.environ.get("19923")
-REDASH_BASE_URL = os.environ.get("https://data.testbook.com/queries/")
+REDASH_API_KEY = "MuksNDK1QVDm6BTBQZzMAcjBzGsY42vi7xyof4yz"
+REDASH_QUERY_ID = "19923"
+REDASH_BASE_URL = "https://data.testbook.com"
 
 def check_preorder_from_redash(query):
     try:
@@ -40,21 +40,37 @@ def check_preorder_from_redash(query):
             "Authorization": f"Key {REDASH_API_KEY}"
         }
 
-        params = {
-            "api_key": REDASH_API_KEY,
-            "p_query": query   # 🔥 change if your parameter name is different
-        }
+        res = requests.get(url, headers=headers, timeout=15)
 
-        res = requests.get(url, headers=headers, params=params, timeout=10)
+        print("🔴 Status Code:", res.status_code)
+
+        if res.status_code != 200:
+            print("❌ Redash failed")
+            return False
+
         data = res.json()
 
         rows = data.get("query_result", {}).get("data", {}).get("rows", [])
 
-        for row in rows:
-            status = str(row.get("shippingStatus", "")).lower()
+        print("🔴 Total rows fetched:", len(rows))
 
-            if "pre order" in status:
-                return True
+        # 🔥 normalize query once
+        q = normalize(query)
+
+        for row in rows:
+            mobile = normalize(row.get("mobile", ""))
+            email = normalize(row.get("email", ""))
+
+            # ✅ MATCH USER
+            if q == mobile or q == email:
+
+                status = str(row.get("shippingStatus", "")).lower()
+                status_clean = status.replace(" ", "").replace("-", "")
+
+                print("✅ Matched Row Status:", status)
+
+                if "preorder" in status_clean:
+                    return True
 
         return False
 
