@@ -51,7 +51,7 @@ def check_preorder_from_redash(query):
         rows = data.get("query_result", {}).get("data", {}).get("rows", [])
 
         for row in rows:
-            status = str(row.get("status", "")).lower()
+            status = str(row.get("shippingStatus", "")).lower()
 
             if "pre order" in status:
                 return True
