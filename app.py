@@ -2,6 +2,7 @@ import os
 import json
 import time
 import threading
+import requests
 import gspread
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -25,11 +26,48 @@ client = gspread.authorize(creds)
 sheet = client.open("BOOK QUERIES").worksheet("All orders")
 
 # ==============================
+# 🔴 REDASH CONFIG
+# ==============================
+REDASH_API_KEY = os.environ.get("MuksNDK1QVDm6BTBQZzMAcjBzGsY42vi7xyof4yz")
+REDASH_QUERY_ID = os.environ.get("19923")
+REDASH_BASE_URL = os.environ.get("https://data.testbook.com/queries/")
+
+def check_preorder_from_redash(query):
+    try:
+        url = f"{REDASH_BASE_URL}/api/queries/{REDASH_QUERY_ID}/results.json"
+
+        headers = {
+            "Authorization": f"Key {REDASH_API_KEY}"
+        }
+
+        params = {
+            "api_key": REDASH_API_KEY,
+            "p_query": query   # 🔥 change if your parameter name is different
+        }
+
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        data = res.json()
+
+        rows = data.get("query_result", {}).get("data", {}).get("rows", [])
+
+        for row in rows:
+            status = str(row.get("status", "")).lower()
+
+            if "pre order" in status:
+                return True
+
+        return False
+
+    except Exception as e:
+        print("❌ Redash error:", str(e))
+        return False
+
+# ==============================
 # 🚀 CACHE CONFIG
 # ==============================
 cache = {}
 last_updated = 0
-CACHE_TTL = 1800  # 🔥 30 minutes (increased)
+CACHE_TTL = 1800  # 30 minutes
 
 # ==============================
 # ✂️ HELPER FUNCTIONS
@@ -47,7 +85,7 @@ def refresh_cache():
     global cache, last_updated
 
     try:
-        records = sheet.get_all_records()  # 🔥 faster than get_all_values
+        records = sheet.get_all_records()
 
         new_cache = {}
 
@@ -101,40 +139,62 @@ def search():
         data_cache = get_cached_data()
         rows = data_cache.get(query)
 
-        if not rows:
-            return jsonify({"status": "Not Found"})
+        # ==============================
+        # ✅ IF FOUND IN SHEET
+        # ==============================
+        if rows:
+            orders = []
 
-        orders = []
+            for row in rows:
+                awb_raw = str(
+                    row.get("AWB Code") or 
+                    row.get("AWB") or ""
+                ).strip()
 
-        for row in rows:
-            awb_raw = str(
-                row.get("AWB Code") or 
-                row.get("AWB") or ""
-            ).strip()
+                awb = awb_raw if awb_raw else None
 
-            awb = awb_raw if awb_raw else None
+                orders.append({
+                    "awb": awb,
+                    "status": row.get("Status", "").strip() or "Pending",
+                    "courier": row.get("Courier Company", "").strip() or "Not Assigned",
+                    "product": get_short_product(row.get("Product Name", "")) or "Not Available",
+                    "created_at": row.get("Shiprocket Created At", "").strip() or "Not Available",
+                    "edd": str(row.get("EDD") or "").strip() or "Not Available",
+                    "tracking_link": f"https://shiprocket.co/tracking/{awb}" if awb else None
+                })
 
-            orders.append({
-                "awb": awb,
-                "status": row.get("Status", "").strip() or "Pending",
-                "courier": row.get("Courier Company", "").strip() or "Not Assigned",
-                "product": get_short_product(row.get("Product Name", "")) or "Not Available",
-                "created_at": row.get("Shiprocket Created At", "").strip() or "Not Available",
-                "edd": str(row.get("EDD") or "").strip() or "Not Available",
-                "tracking_link": f"https://shiprocket.co/tracking/{awb}" if awb else None
+            return jsonify({
+                "count": len(orders),
+                "orders": list(reversed(orders))
             })
 
-        return jsonify({
-            "count": len(orders),
-            "orders": list(reversed(orders))  # latest first
-        })
+        # ==============================
+        # 🔥 FALLBACK → REDASH
+        # ==============================
+        is_preorder = check_preorder_from_redash(query)
+
+        if is_preorder:
+            return jsonify({
+                "count": 1,
+                "orders": [{
+                    "awb": None,
+                    "status": "Pre Order",
+                    "courier": "Not Available",
+                    "product": "Not Available",
+                    "created_at": "Not Available",
+                    "edd": "Not Available",
+                    "tracking_link": None
+                }]
+            })
+
+        return jsonify({"status": "Not Found"})
 
     except Exception as e:
         print("❌ ERROR:", str(e))
         return jsonify({"status": "Error", "message": str(e)})
 
 # ==============================
-# 🔄 MANUAL REFRESH (OPTIONAL)
+# 🔄 MANUAL REFRESH
 # ==============================
 @app.route("/refresh")
 def manual_refresh():
