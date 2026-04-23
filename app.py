@@ -58,6 +58,7 @@ def refresh_cache():
         for data in records:
             mobile_raw = str(data.get("Customer Mobile", "")).strip()
             email = str(data.get("Customer Email", "")).strip().lower()
+            order_id = str(data.get("Order ID", "")).strip()  # ✅ Order ID added
 
             m10 = last10(mobile_raw)
 
@@ -66,6 +67,9 @@ def refresh_cache():
 
             if email:
                 new_cache.setdefault(email, []).append(data)
+
+            if order_id:
+                new_cache.setdefault(order_id, []).append(data)  # ✅ Cache by Order ID
 
         cache = new_cache
         last_updated = time.time()
@@ -84,7 +88,7 @@ def get_cached_data():
     return cache
 
 # ==============================
-# ⚡ REDASH CACHE (FAST)
+# ⚡ REDASH CACHE
 # ==============================
 redash_cache = []
 redash_last_updated = 0
@@ -121,16 +125,18 @@ def get_redash_data():
         return []
 
 # ==============================
-# 🔍 REDASH SEARCH
+# 🔍 REDASH SEARCH (UPDATED)
 # ==============================
 def check_redash(query):
     rows = get_redash_data()
-    q = last10(query)
+    q_mobile = last10(query)
+    q_order = str(query).strip()
 
     for row in rows:
         mobile = last10(row.get("mobile", ""))
+        order_id = str(row.get("order_id") or row.get("orderId") or "").strip()
 
-        if q == mobile:
+        if q_mobile == mobile or q_order == order_id:  # ✅ Order ID match added
             status = str(
                 row.get("shippingStatus") or 
                 row.get("shipping_status") or 
@@ -165,13 +171,18 @@ def search():
 
         query_mobile = last10(query_raw)
         query_email = str(query_raw).strip().lower()
+        query_order = str(query_raw).strip()
 
         data_cache = get_cached_data()
 
         # ======================
         # ✅ SHEET SEARCH
         # ======================
-        rows = data_cache.get(query_mobile) or data_cache.get(query_email)
+        rows = (
+            data_cache.get(query_mobile)
+            or data_cache.get(query_email)
+            or data_cache.get(query_order)   # ✅ Order ID search
+        )
 
         if rows:
             orders = []
@@ -207,7 +218,7 @@ def search():
                     "awb": None,
                     "status": result["status"],
                     "courier": "Not Available",
-                    "product": result["product"],  # ✅ pname
+                    "product": result["product"],
                     "created_at": "Not Available",
                     "edd": "Not Available",
                     "tracking_link": None
