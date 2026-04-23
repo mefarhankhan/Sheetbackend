@@ -33,7 +33,7 @@ REDASH_QUERY_ID = "19923"
 REDASH_BASE_URL = "https://data.testbook.com"
 
 # ==============================
-# ✂️ HELPER FUNCTIONS
+# ✂️ HELPERS
 # ==============================
 def last10(val):
     v = str(val).strip().replace(" ", "").replace("+", "")
@@ -43,66 +43,14 @@ def get_short_product(name):
     return name[:40] if name else ""
 
 # ==============================
-# 🔴 REDASH SEARCH
-# ==============================
-def check_status_from_redash(query):
-    try:
-        url = f"{REDASH_BASE_URL}/api/queries/{REDASH_QUERY_ID}/results.json"
-
-        headers = {
-            "Authorization": f"Key {REDASH_API_KEY}"
-        }
-
-        res = requests.get(url, headers=headers, timeout=15)
-
-        print("🔴 Status Code:", res.status_code)
-
-        if res.status_code != 200:
-            print("❌ Redash failed:", res.text)
-            return None
-
-        data = res.json()
-        rows = data.get("query_result", {}).get("data", {}).get("rows", [])
-
-        print("🔴 Total rows:", len(rows))
-
-        q = last10(query)
-
-        for row in rows:
-            mobile = last10(row.get("mobile", ""))
-            email = str(row.get("email", "")).strip().lower()
-
-            if q == mobile or q == email:
-                status = str(
-                    row.get("shippingStatus") or 
-                    row.get("shipping_status") or 
-                    row.get("status") or 
-                    ""
-                ).strip()
-
-                print("✅ MATCH FOUND:", status)
-                return status if status else "Not Available"
-
-        print("❌ No match in Redash")
-        return None
-
-    except Exception as e:
-        print("❌ Redash error:", str(e))
-        return None
-
-# ==============================
-# 🚀 CACHE CONFIG
+# 🚀 SHEET CACHE
 # ==============================
 cache = {}
 last_updated = 0
-CACHE_TTL = 1800  # 30 minutes
+CACHE_TTL = 1800  # 30 min
 
-# ==============================
-# 🔄 CACHE REFRESH
-# ==============================
 def refresh_cache():
     global cache, last_updated
-
     try:
         records = sheet.get_all_records()
         new_cache = {}
@@ -113,32 +61,22 @@ def refresh_cache():
 
             m10 = last10(mobile_raw)
 
-            keys = []
-
             if m10:
-                keys.append(m10)
+                new_cache.setdefault(m10, []).append(data)
 
             if email:
-                keys.append(email)
-
-            for key in keys:
-                new_cache.setdefault(key, []).append(data)
+                new_cache.setdefault(email, []).append(data)
 
         cache = new_cache
         last_updated = time.time()
 
-        print(f"✅ Cache refreshed: {len(cache)} users")
+        print(f"✅ Sheet cache: {len(cache)} users")
 
     except Exception as e:
         print("❌ Cache error:", str(e))
 
-# ==============================
-# ⚡ ASYNC REFRESH
-# ==============================
 def refresh_cache_async():
-    thread = threading.Thread(target=refresh_cache)
-    thread.daemon = True
-    thread.start()
+    threading.Thread(target=refresh_cache, daemon=True).start()
 
 def get_cached_data():
     if time.time() - last_updated > CACHE_TTL:
@@ -146,40 +84,100 @@ def get_cached_data():
     return cache
 
 # ==============================
+# ⚡ REDASH CACHE (FAST)
+# ==============================
+redash_cache = []
+redash_last_updated = 0
+REDASH_CACHE_TTL = 300  # 5 min
+
+def get_redash_data():
+    global redash_cache, redash_last_updated
+
+    if time.time() - redash_last_updated < REDASH_CACHE_TTL:
+        return redash_cache
+
+    try:
+        url = f"{REDASH_BASE_URL}/api/queries/{REDASH_QUERY_ID}/results.json"
+        headers = {"Authorization": f"Key {REDASH_API_KEY}"}
+
+        res = requests.get(url, headers=headers, timeout=15)
+
+        if res.status_code != 200:
+            print("❌ Redash failed")
+            return []
+
+        data = res.json()
+        rows = data.get("query_result", {}).get("data", {}).get("rows", [])
+
+        redash_cache = rows
+        redash_last_updated = time.time()
+
+        print(f"🔴 Redash cache: {len(rows)} rows")
+
+        return rows
+
+    except Exception as e:
+        print("❌ Redash error:", str(e))
+        return []
+
+# ==============================
+# 🔍 REDASH SEARCH
+# ==============================
+def check_redash(query):
+    rows = get_redash_data()
+    q = last10(query)
+
+    for row in rows:
+        mobile = last10(row.get("mobile", ""))
+
+        if q == mobile:
+            status = str(
+                row.get("shippingStatus") or 
+                row.get("shipping_status") or 
+                row.get("status") or 
+                ""
+            ).strip()
+
+            product = str(row.get("pname") or "Not Available").strip()
+
+            return {
+                "status": status if status else "Not Available",
+                "product": product
+            }
+
+    return None
+
+# ==============================
 # 🏠 ROUTES
 # ==============================
 @app.route("/")
 def home():
-    return "API is running 🚀"
+    return "API running 🚀"
 
 @app.route("/search", methods=["POST"])
 def search():
     try:
         data = request.get_json(silent=True) or {}
-
         query_raw = data.get("query", "")
-        query_mobile = last10(query_raw)
-        query_email = str(query_raw).strip().lower()
 
         if not query_raw:
             return jsonify({"status": "Invalid query"})
 
+        query_mobile = last10(query_raw)
+        query_email = str(query_raw).strip().lower()
+
         data_cache = get_cached_data()
 
-        # ==============================
+        # ======================
         # ✅ SHEET SEARCH
-        # ==============================
+        # ======================
         rows = data_cache.get(query_mobile) or data_cache.get(query_email)
 
         if rows:
             orders = []
 
             for row in rows:
-                awb_raw = str(
-                    row.get("AWB Code") or 
-                    row.get("AWB") or ""
-                ).strip()
-
+                awb_raw = str(row.get("AWB Code") or row.get("AWB") or "").strip()
                 awb = awb_raw if awb_raw else None
 
                 orders.append({
@@ -197,19 +195,19 @@ def search():
                 "orders": list(reversed(orders))
             })
 
-        # ==============================
+        # ======================
         # 🔥 REDASH FALLBACK
-        # ==============================
-        status = check_status_from_redash(query_raw)
+        # ======================
+        result = check_redash(query_raw)
 
-        if status:
+        if result:
             return jsonify({
                 "count": 1,
                 "orders": [{
                     "awb": None,
-                    "status": status,
+                    "status": result["status"],
                     "courier": "Not Available",
-                    "product": "Not Available",
+                    "product": result["product"],  # ✅ pname
                     "created_at": "Not Available",
                     "edd": "Not Available",
                     "tracking_link": None
@@ -228,16 +226,13 @@ def search():
 @app.route("/refresh")
 def manual_refresh():
     refresh_cache_async()
-    return "Cache refresh started 🚀"
+    return "Sheet cache refresh started 🚀"
 
 # ==============================
-# 🚀 PRELOAD CACHE
+# 🚀 STARTUP
 # ==============================
 refresh_cache()
 
-# ==============================
-# ▶️ RUN
-# ==============================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
