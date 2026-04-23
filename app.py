@@ -138,7 +138,7 @@ def check_redash(query):
                 ""
             ).strip()
 
-            product = str(row.get("pname") or "Not Available").strip()
+            product = str(row.get("pName") or "Not Available").strip()
 
             return {
                 "status": status if status else "Not Available",
