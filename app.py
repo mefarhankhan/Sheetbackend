@@ -32,59 +32,6 @@ REDASH_API_KEY = "MuksNDK1QVDm6BTBQZzMAcjBzGsY42vi7xyof4yz"
 REDASH_QUERY_ID = "19923"
 REDASH_BASE_URL = "https://data.testbook.com"
 
-def check_preorder_from_redash(query):
-    try:
-        url = f"{REDASH_BASE_URL}/api/queries/{REDASH_QUERY_ID}/results.json"
-
-        headers = {
-            "Authorization": f"Key {REDASH_API_KEY}"
-        }
-
-        res = requests.get(url, headers=headers, timeout=15)
-
-        print("🔴 Status Code:", res.status_code)
-
-        if res.status_code != 200:
-            print("❌ Redash failed")
-            return False
-
-        data = res.json()
-
-        rows = data.get("query_result", {}).get("data", {}).get("rows", [])
-
-        print("🔴 Total rows fetched:", len(rows))
-
-        # 🔥 normalize query once
-        q = normalize(query)
-
-        for row in rows:
-            mobile = normalize(row.get("mobile", ""))
-            email = normalize(row.get("email", ""))
-
-            # ✅ MATCH USER
-            if q == mobile or q == email:
-
-                status = str(row.get("shippingStatus", "")).lower()
-                status_clean = status.replace(" ", "").replace("-", "")
-
-                print("✅ Matched Row Status:", status)
-
-                if "preorder" in status_clean:
-                    return True
-
-        return False
-
-    except Exception as e:
-        print("❌ Redash error:", str(e))
-        return False
-
-# ==============================
-# 🚀 CACHE CONFIG
-# ==============================
-cache = {}
-last_updated = 0
-CACHE_TTL = 1800  # 30 minutes
-
 # ==============================
 # ✂️ HELPER FUNCTIONS
 # ==============================
@@ -95,6 +42,52 @@ def get_short_product(name):
     return name[:40] if name else ""
 
 # ==============================
+# 🔴 REDASH SEARCH (UPDATED)
+# ==============================
+def check_status_from_redash(query):
+    try:
+        url = f"{REDASH_BASE_URL}/api/queries/{REDASH_QUERY_ID}/results.json"
+
+        headers = {
+            "Authorization": f"Key {REDASH_API_KEY}"
+        }
+
+        res = requests.get(url, headers=headers, timeout=15)
+
+        if res.status_code != 200:
+            print("❌ Redash failed")
+            return None
+
+        data = res.json()
+        rows = data.get("query_result", {}).get("data", {}).get("rows", [])
+
+        print("🔴 Total rows fetched:", len(rows))
+
+        q = normalize(query)
+
+        for row in rows:
+            mobile = normalize(row.get("mobile", ""))
+            email = normalize(row.get("email", ""))
+
+            if q == mobile or q == email:
+                status = str(row.get("shippingStatus", "")).strip()
+                print("✅ Found in Redash:", status)
+                return status if status else "Not Available"
+
+        return None
+
+    except Exception as e:
+        print("❌ Redash error:", str(e))
+        return None
+
+# ==============================
+# 🚀 CACHE CONFIG
+# ==============================
+cache = {}
+last_updated = 0
+CACHE_TTL = 1800  # 30 minutes
+
+# ==============================
 # 🔄 CACHE REFRESH
 # ==============================
 def refresh_cache():
@@ -102,7 +95,6 @@ def refresh_cache():
 
     try:
         records = sheet.get_all_records()
-
         new_cache = {}
 
         for data in records:
@@ -187,14 +179,14 @@ def search():
         # ==============================
         # 🔥 FALLBACK → REDASH
         # ==============================
-        is_preorder = check_preorder_from_redash(query)
+        status = check_status_from_redash(query)
 
-        if is_preorder:
+        if status:
             return jsonify({
                 "count": 1,
                 "orders": [{
                     "awb": None,
-                    "status": "Pre Order",
+                    "status": status,   # ✅ actual shippingStatus
                     "courier": "Not Available",
                     "product": "Not Available",
                     "created_at": "Not Available",
