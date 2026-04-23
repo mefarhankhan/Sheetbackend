@@ -35,14 +35,15 @@ REDASH_BASE_URL = "https://data.testbook.com"
 # ==============================
 # ✂️ HELPER FUNCTIONS
 # ==============================
-def normalize(value):
-    return str(value).strip().lower().replace(" ", "").replace("+91", "")
+def last10(val):
+    v = str(val).strip().replace(" ", "").replace("+", "")
+    return v[-10:] if len(v) >= 10 else v
 
 def get_short_product(name):
     return name[:40] if name else ""
 
 # ==============================
-# 🔴 REDASH SEARCH (FIXED)
+# 🔴 REDASH SEARCH
 # ==============================
 def check_status_from_redash(query):
     try:
@@ -65,14 +66,13 @@ def check_status_from_redash(query):
 
         print("🔴 Total rows:", len(rows))
 
-        q = normalize(query)
+        q = last10(query)
 
         for row in rows:
-            mobile = str(row.get("mobile", "")).strip().replace(" ", "").replace("+", "")
-            email = normalize(row.get("email", ""))
+            mobile = last10(row.get("mobile", ""))
+            email = str(row.get("email", "")).strip().lower()
 
-            # 🔥 FIX: endswith match
-            if mobile.endswith(q) or email == q:
+            if q == mobile or q == email:
                 status = str(
                     row.get("shippingStatus") or 
                     row.get("shipping_status") or 
@@ -108,14 +108,21 @@ def refresh_cache():
         new_cache = {}
 
         for data in records:
-            mobile = normalize(data.get("Customer Mobile"))
-            email = normalize(data.get("Customer Email"))
+            mobile_raw = str(data.get("Customer Mobile", "")).strip()
+            email = str(data.get("Customer Email", "")).strip().lower()
 
-            keys = [mobile, email]
+            m10 = last10(mobile_raw)
+
+            keys = []
+
+            if m10:
+                keys.append(m10)
+
+            if email:
+                keys.append(email)
 
             for key in keys:
-                if key:
-                    new_cache.setdefault(key, []).append(data)
+                new_cache.setdefault(key, []).append(data)
 
         cache = new_cache
         last_updated = time.time()
@@ -149,17 +156,21 @@ def home():
 def search():
     try:
         data = request.get_json(silent=True) or {}
-        query = normalize(data.get("query", ""))
 
-        if not query:
+        query_raw = data.get("query", "")
+        query_mobile = last10(query_raw)
+        query_email = str(query_raw).strip().lower()
+
+        if not query_raw:
             return jsonify({"status": "Invalid query"})
 
         data_cache = get_cached_data()
-        rows = data_cache.get(query)
 
         # ==============================
-        # ✅ IF FOUND IN SHEET
+        # ✅ SHEET SEARCH
         # ==============================
+        rows = data_cache.get(query_mobile) or data_cache.get(query_email)
+
         if rows:
             orders = []
 
@@ -187,9 +198,9 @@ def search():
             })
 
         # ==============================
-        # 🔥 FALLBACK → REDASH
+        # 🔥 REDASH FALLBACK
         # ==============================
-        status = check_status_from_redash(query)
+        status = check_status_from_redash(query_raw)
 
         if status:
             return jsonify({
