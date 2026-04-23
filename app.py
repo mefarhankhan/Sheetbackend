@@ -28,7 +28,7 @@ sheet = client.open("BOOK QUERIES").worksheet("All orders")
 # ==============================
 # 🔴 REDASH CONFIG
 # ==============================
-REDASH_API_KEY = "MuksNDK1QVDm6BTBQZzMAcjBzGsY42vi7xyof4yz"
+REDASH_API_KEY = os.environ.get("REDASH_API_KEY")
 REDASH_QUERY_ID = "19923"
 REDASH_BASE_URL = "https://data.testbook.com"
 
@@ -42,7 +42,7 @@ def get_short_product(name):
     return name[:40] if name else ""
 
 # ==============================
-# 🔴 REDASH SEARCH (UPDATED)
+# 🔴 REDASH SEARCH (FIXED)
 # ==============================
 def check_status_from_redash(query):
     try:
@@ -54,26 +54,36 @@ def check_status_from_redash(query):
 
         res = requests.get(url, headers=headers, timeout=15)
 
+        print("🔴 Status Code:", res.status_code)
+
         if res.status_code != 200:
-            print("❌ Redash failed")
+            print("❌ Redash failed:", res.text)
             return None
 
         data = res.json()
         rows = data.get("query_result", {}).get("data", {}).get("rows", [])
 
-        print("🔴 Total rows fetched:", len(rows))
+        print("🔴 Total rows:", len(rows))
 
         q = normalize(query)
 
         for row in rows:
-            mobile = normalize(row.get("mobile", ""))
+            mobile = str(row.get("mobile", "")).strip().replace(" ", "").replace("+", "")
             email = normalize(row.get("email", ""))
 
-            if q == mobile or q == email:
-                status = str(row.get("shippingStatus", "")).strip()
-                print("✅ Found in Redash:", status)
+            # 🔥 FIX: endswith match
+            if mobile.endswith(q) or email == q:
+                status = str(
+                    row.get("shippingStatus") or 
+                    row.get("shipping_status") or 
+                    row.get("status") or 
+                    ""
+                ).strip()
+
+                print("✅ MATCH FOUND:", status)
                 return status if status else "Not Available"
 
+        print("❌ No match in Redash")
         return None
 
     except Exception as e:
@@ -186,7 +196,7 @@ def search():
                 "count": 1,
                 "orders": [{
                     "awb": None,
-                    "status": status,   # ✅ actual shippingStatus
+                    "status": status,
                     "courier": "Not Available",
                     "product": "Not Available",
                     "created_at": "Not Available",
